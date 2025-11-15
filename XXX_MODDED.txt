@@ -7,9 +7,17 @@
 // 3. Changed all request.security() calls from lookahead_on to lookahead_off
 // 4. Set delayOffset default to 1 to use confirmed bar data
 // 5. All signals now based on confirmed bars for reliable backtesting and live trading
+//
+// v6_1_24_NR IMPROVEMENTS - Fixed negative returns issue:
+// 1. Increased MA period from 2 to 8 to reduce whipsaw trades
+// 2. Added EMA 144 trend filter - only long above EMA, only short below
+// 3. Added RSI filter to avoid extreme overbought/oversold conditions
+// 4. Added ATR volatility filter to avoid low-movement periods
+// 5. Improved risk/reward: TP1=1.2%, TP2=2%, TP3=3%, SL=0.75%
+// 6. Adjusted position sizing: TP1=40%, TP2=35%, TP3=25%
 
 //@version=5
-VERSION                   = 'v6_1_23_NR'// Non-Repainting Version
+VERSION                   = 'v6_1_24_NR'// Non-Repainting Version with Improved Filters
 strategy(
   'XXX',
   shorttitle              = 'XXX ' + VERSION,
@@ -37,7 +45,8 @@ res                       = input.timeframe('15',  'TIMEFRAME', group ="NON REPA
 useRes                    = input(true,            'Use Alternate Signals')
 intRes                    = input(8,               'Multiplier for Alernate Signals')
 basisType                 = input.string('ALMA',   'MA Type: ', options=['TEMA', 'HullMA', 'ALMA'])
-basisLen                  = input.int(2,           'MA Period', minval=1)
+basisLen                  = input.int(8,           'MA Period', minval=1,
+                  tooltip = 'Increased from 2 to 8 to reduce whipsaw trades')
 offsetSigma               = input.int(5,           'Offset for LSMA / Sigma for ALMA', minval=0)
 offsetALMA                = input.float(0.85,      'Offset for ALMA', minval=0, step=0.01)
 scolor                    = input(false,           'Show coloured Bars to indicate Trend?')
@@ -46,6 +55,15 @@ delayOffset               = input.int(1,           'Delay Open/Close MA', minval
                   tooltip = 'Forces Non-Repainting - Uses confirmed bar data')
 tradeType                 = input.string('BOTH',   'What trades should be taken : ',
                   options = ['LONG', 'SHORT', 'BOTH', 'NONE'])
+// IMPROVED FILTERS
+useTrendFilter            = input.bool(true,       'Use Trend Filter (EMA 144)', group='FILTERS',
+                  tooltip = 'Only long above EMA, only short below EMA')
+useRSIFilter              = input.bool(true,       'Use RSI Filter', group='FILTERS',
+                  tooltip = 'Avoid overbought/oversold extremes')
+useVolFilter              = input.bool(true,       'Use Volatility Filter', group='FILTERS',
+                  tooltip = 'Only trade when ATR is above minimum threshold')
+minATR                    = input.float(0.0001,    'Minimum ATR', group='FILTERS',
+                  tooltip = 'Minimum ATR required to take trades')
 //=== /INPUTS ===
 h                         = input(false,           'Signals for Heikin Ashi Candles')
 //INDICATOR SETTINGS
@@ -832,8 +850,26 @@ openSeriesAlt  = reso(openSeries, useRes, res)
 //<triggers>
 lxTrigger    = false
 sxTrigger    = false
-leTrigger    = ta.crossover (closeSeriesAlt, openSeriesAlt)
-seTrigger    = ta.crossunder(closeSeriesAlt, openSeriesAlt)
+
+// Base crossover signals
+baseLongSignal  = ta.crossover (closeSeriesAlt, openSeriesAlt)
+baseShortSignal = ta.crossunder(closeSeriesAlt, openSeriesAlt)
+
+// IMPROVED FILTER CONDITIONS
+// Trend Filter: Only long above EMA 144, only short below
+trendFilterLong  = useTrendFilter ? close > ema : true
+trendFilterShort = useTrendFilter ? close < ema : true
+
+// RSI Filter: Avoid extreme overbought/oversold (less whipsaw at extremes)
+rsiFilterLong  = useRSIFilter ? (rsi < 65 and rsi > 30) : true  // Not overbought
+rsiFilterShort = useRSIFilter ? (rsi > 35 and rsi < 70) : true  // Not oversold
+
+// Volatility Filter: Only trade when there's sufficient movement
+volFilter = useVolFilter ? atrValue > minATR : true
+
+// Combined entry triggers with all filters
+leTrigger = baseLongSignal and trendFilterLong and rsiFilterLong and volFilter
+seTrigger = baseShortSignal and trendFilterShort and rsiFilterShort and volFilter
 
 G_RISK       = '■ ' + 'Risk Management'
 //#region ———— <↓↓↓ G_RISK ↓↓↓> {
@@ -858,20 +894,20 @@ O_SXMSGC     = 'Short TP3'
 O_SXMSGX     = 'Short Exit'
 
 // ——————————— <input>          |           |                               |                        Line length guide |
-i_lxLvlTP1   = input.float      (1,         'Level TP1'                     , group = G_RISK,
+i_lxLvlTP1   = input.float      (1.2,       'Level TP1'                     , group = G_RISK,
      tooltip =                   T_LVL)
-i_lxQtyTP1   = input.float      (50,        'Qty   TP1'                     , group = G_RISK,
+i_lxQtyTP1   = input.float      (40,        'Qty   TP1'                     , group = G_RISK,
      tooltip =                   T_QTY)
-i_lxLvlTP2   = input.float      (1.5,       'Level TP2'                     , group = G_RISK,
+i_lxLvlTP2   = input.float      (2,         'Level TP2'                     , group = G_RISK,
      tooltip =                   T_LVL)
-i_lxQtyTP2   = input.float      (30,        'Qty   TP2'                     , group = G_RISK,
+i_lxQtyTP2   = input.float      (35,        'Qty   TP2'                     , group = G_RISK,
      tooltip =                   T_QTY)
-i_lxLvlTP3   = input.float      (2,         'Level TP3'                     , group = G_RISK,
+i_lxLvlTP3   = input.float      (3,         'Level TP3'                     , group = G_RISK,
      tooltip =                   T_LVL)
-i_lxQtyTP3   = input.float      (20,        'Qty   TP3'                     , group = G_RISK,
+i_lxQtyTP3   = input.float      (25,        'Qty   TP3'                     , group = G_RISK,
      tooltip =                   T_QTY)
-i_lxLvlSL    = input.float      (0.5,       'Stop Loss'                     , group = G_RISK,
-     tooltip =                   T_LVL)
+i_lxLvlSL    = input.float      (0.75,      'Stop Loss'                     , group = G_RISK,
+     tooltip =                   'Widened to 0.75% to avoid getting stopped by normal volatility')
 i_sxLvlTP1   = i_lxLvlTP1
 i_sxQtyTP1   = i_lxQtyTP1
 i_sxLvlTP2   = i_lxLvlTP2
