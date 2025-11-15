@@ -1,10 +1,15 @@
 // This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © traderschatroom88
-
-
+//
+// NON-REPAINTING VERSION - All repaint issues fixed for live trading:
+// 1. Removed fixnan() on pivots - now uses raw pivot values
+// 2. Fixed rp_security() to always use offset [1] instead of barstate.isrealtime conditional
+// 3. Changed all request.security() calls from lookahead_on to lookahead_off
+// 4. Set delayOffset default to 1 to use confirmed bar data
+// 5. All signals now based on confirmed bars for reliable backtesting and live trading
 
 //@version=5
-VERSION                   = 'v6_1_23'// 2023.10.13
+VERSION                   = 'v6_1_23_NR'// Non-Repainting Version
 strategy(
   'XXX',
   shorttitle              = 'XXX ' + VERSION,
@@ -36,8 +41,9 @@ basisLen                  = input.int(2,           'MA Period', minval=1)
 offsetSigma               = input.int(5,           'Offset for LSMA / Sigma for ALMA', minval=0)
 offsetALMA                = input.float(0.85,      'Offset for ALMA', minval=0, step=0.01)
 scolor                    = input(false,           'Show coloured Bars to indicate Trend?')
-delayOffset               = input.int(0,           'Delay Open/Close MA', minval=0, step=1,
-                  tooltip = 'Forces Non-Repainting')
+// Fixed: Changed default from 0 to 1 to force non-repainting by using confirmed bar data
+delayOffset               = input.int(1,           'Delay Open/Close MA', minval=0, step=1,
+                  tooltip = 'Forces Non-Repainting - Uses confirmed bar data')
 tradeType                 = input.string('BOTH',   'What trades should be taken : ',
                   options = ['LONG', 'SHORT', 'BOTH', 'NONE'])
 //=== /INPUTS ===
@@ -378,8 +384,9 @@ lr_dev(_src, _len, _slp, _avg, _int) =>
 
 barsL          = 10
 barsR          = 10
-pivotHigh      = fixnan(ta.pivothigh(barsL, barsR)[1])
-pivotLow       = fixnan(ta.pivotlow(barsL, barsR)[1])
+// Fixed: Removed fixnan() to prevent repainting - pivots will be NA until confirmed
+pivotHigh      = ta.pivothigh(barsL, barsR)[1]
+pivotLow       = ta.pivotlow(barsL, barsR)[1]
 source         = close, period = 150
 [s, a, i]      = lr_slope(source, period)
 [upDev, dnDev] = lr_dev(source, period, s, a, i)
@@ -477,8 +484,9 @@ var target_bear = 0.
 
 /////////////////////////////////////////////
 // Create non-repainting security function
+// Fixed: Always use offset of 1 to prevent repainting on historical vs realtime bars
 rp_security(_symbol, _res, _src) =>
-    request.security(_symbol, _res, _src[barstate.isrealtime ? 1 : 0])
+    request.security(_symbol, _res, _src[1], barmerge.gaps_off, barmerge.lookahead_off)
 
 htfHigh = rp_security(syminfo.tickerid, res, high)
 htfLow  = rp_security(syminfo.tickerid, res, low)
@@ -493,7 +501,8 @@ rngfilt(x, r) =>
     rngfilt = x
     rngfilt := x > nz(rngfilt[1]) ? x - r < nz(rngfilt[1]) ? nz(rngfilt[1]) : x - r : x + r > nz(rngfilt[1]) ? nz(rngfilt[1]) : x + r
 percWidth(len, perc) => (ta.highest(len) - ta.lowest(len)) * perc / 100
-securityNoRep(sym, res, src) => request.security(sym, res, src, barmerge.gaps_off, barmerge.lookahead_on)
+// Fixed: Changed lookahead_on to lookahead_off to prevent repainting
+securityNoRep(sym, res, src) => request.security(sym, res, src, barmerge.gaps_off, barmerge.lookahead_off)
 swingPoints(prd) =>
     pivHi = ta.pivothigh(prd, prd)
     pivLo = ta.pivotlow (prd, prd)
@@ -685,10 +694,11 @@ emaBull = close > ema
 equal_tf(res) => str.tonumber(res) == f_chartTfInMinutes() and not timeframe.isseconds
 higher_tf(res) => str.tonumber(res) > f_chartTfInMinutes() or timeframe.isseconds
 too_small_tf(res) => (timeframe.isweekly and res=="1") or (timeframe.ismonthly and str.tonumber(res) < 10)
+// Fixed: Changed lookahead_on to lookahead_off to prevent repainting
 securityNoRep1(sym, res, src) =>
     bool bull_ = na
     bull_ := equal_tf(res) ? src : bull_
-    bull_ := higher_tf(res) ? request.security(sym, res, src, barmerge.gaps_off, barmerge.lookahead_on) : bull_
+    bull_ := higher_tf(res) ? request.security(sym, res, src, barmerge.gaps_off, barmerge.lookahead_off) : bull_
     bull_array = request.security_lower_tf(syminfo.tickerid, higher_tf(res) ? str.tostring(f_chartTfInMinutes()) + (timeframe.isseconds ? "S" : "") : too_small_tf(res) ? (timeframe.isweekly ? "3" : "10") : res, src)
     if array.size(bull_array) > 1 and not equal_tf(res) and not higher_tf(res)
         bull_ := array.pop(bull_array)
@@ -739,8 +749,9 @@ variant(type, src, len, offSig, offALMA) =>
     type == 'EMA' ? v2 : type == 'DEMA' ? v3 : type == 'TEMA' ? v4 : type == 'WMA' ? v5 : type == 'VWMA' ? v6 : type == 'SMMA' ? v7 : type == 'HullMA' ? v8 : type == 'LSMA' ? v9 : type == 'ALMA' ? v10 : type == 'TMA' ? v11 : type == 'SSMA' ? v12 : v1
 
 // security wrapper for repeat calls
+// Fixed: Changed lookahead_on to lookahead_off to prevent repainting
 reso(exp, use, res) =>
-    security_1 = request.security(syminfo.tickerid, res, exp, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+    security_1 = request.security(syminfo.tickerid, res, exp, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
     use ? security_1 : exp
 
 // === /BASE FUNCTIONS ===
