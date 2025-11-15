@@ -235,8 +235,12 @@ stratRes = timeframe.ismonthly  ? str.tostring(timeframe.multiplier * intRes, '#
            timeframe.isdaily    ? str.tostring(timeframe.multiplier * intRes, '###D') :
            timeframe.isintraday ? str.tostring(timeframe.multiplier * intRes, '####') :
            '60'
-src      = h ? request.security(ticker.heikinashi(syminfo.tickerid),
+// Fixed: Get Heikin Ashi open and close for signals when h=true
+haClose  = h ? request.security(ticker.heikinashi(syminfo.tickerid),
            timeframe.period, close, lookahead = barmerge.lookahead_off) : close
+haOpen   = h ? request.security(ticker.heikinashi(syminfo.tickerid),
+           timeframe.period, open, lookahead = barmerge.lookahead_off) : open
+src      = haClose
 
 //      CALCULATE ATR 
 atrValue = ta.atr(50)
@@ -756,13 +760,15 @@ reso(exp, use, res) =>
 
 // === /BASE FUNCTIONS ===
 // === SERIES SETUP ===
-closeSeries = variant(basisType, close[delayOffset], basisLen, offsetSigma, offsetALMA)
-openSeries  = variant(basisType, open[delayOffset],  basisLen, offsetSigma, offsetALMA)
+// Fixed: Use Heikin Ashi values when h=true so the toggle actually affects signals
+closeSeries = variant(basisType, haClose[delayOffset], basisLen, offsetSigma, offsetALMA)
+openSeries  = variant(basisType, haOpen[delayOffset],  basisLen, offsetSigma, offsetALMA)
 // === /SERIES ===
 
 // Get Alternate resolution Series if selected.
-closeSeriesAlt = reso(closeSeries, useRes, stratRes)
-openSeriesAlt  = reso(openSeries, useRes, stratRes)
+// Fixed: Use 'res' input instead of 'stratRes' so TIMEFRAME input actually affects signals
+closeSeriesAlt = reso(closeSeries, useRes, res)
+openSeriesAlt  = reso(openSeries, useRes, res)
 //
 // // === ALERT conditions
 // xlong     = ta.crossover(closeSeriesAlt, openSeriesAlt)
